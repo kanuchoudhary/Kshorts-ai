@@ -15,6 +15,15 @@ DB=ROOT/"jobs.json"
 MAX_BYTES=int(os.getenv("MAX_UPLOAD_MB","800"))*1024*1024
 MODEL=os.getenv("WHISPER_MODEL","small")
 app=FastAPI(title="K-SHORTS AI API",version="0.1.0")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "https://kshorts-frontend.onrender.com"
+    ],
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 @app.get("/")
 def home():
     return {
