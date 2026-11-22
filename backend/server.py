@@ -15,6 +15,13 @@ DB=ROOT/"jobs.json"
 MAX_BYTES=int(os.getenv("MAX_UPLOAD_MB","800"))*1024*1024
 MODEL=os.getenv("WHISPER_MODEL","small")
 app=FastAPI(title="K-SHORTS AI API",version="0.1.0")
+@app.get("/")
+def home():
+    return {
+        "message": "Welcome to K-SHORTS AI",
+        "status": "running",
+        "version": "1.0.0"
+    }
 @app.get("/healthz")
 def healthz():
     return {"status": "ok"}
