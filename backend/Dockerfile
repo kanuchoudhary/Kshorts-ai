@@ -6,4 +6,4 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY server.py .
 ENV DATA_DIR=/app/data WHISPER_MODEL=small WHISPER_DEVICE=cpu WHISPER_COMPUTE=int8
 EXPOSE 8000
-CMD ["uvicorn","server:app","--host","0.0.0.0","--port","8000"]
+CMD ["sh", "-c", "uvicorn server:app --host 0.0.0.0 --port ${PORT:-10000}"]
