@@ -62,27 +62,98 @@ def srt_time(sec):
     return f"{h:02}:{m:02}:{s:02},{ms:03}"
 def clean_text(t): return re.sub(r"\s+"," ",t).strip()
 def pick_windows(segments, duration, wanted=5, min_len=22, max_len=58):
-    # Score transcript windows for complete, expressive phrases; then select non-overlapping moments.
-    candidates=[]
-    for i,seg in enumerate(segments):
-        start=float(seg["start"]); end=min(duration,start+max_len)
-        if end-start<min_len: continue
-        window=[x for x in segments if x["start"]>=start and x["start"]<end]
-        text=" ".join(x["text"] for x in window).strip()
-        words=len(text.split())
-        if words<18: continue
-        cues=sum(1 for w in ["because","secret","mistake","important","why","how","लेकिन","क्यों","कैसे","ਸੱਚ","ਕਿਉਂ","ਕਿਵੇਂ"] if w.lower() in text.lower())
-        score=min(words,100)/12 + cues*1.8 + min(1.0,sum(x.get("confidence",0.5) for x in window)/max(1,len(window)))
-        candidates.append({"start":start,"end":end,"text":text,"score":score})
-    candidates.sort(key=lambda x:x["score"],reverse=True)
-    chosen=[]
-    for c in candidates:
-        if all(c["end"]<=x["start"] or c["start"]>=x["end"] for x in chosen):
-            chosen.append(c)
-        if len(chosen)>=wanted: break
-    if not chosen and duration>0:
-        start=0; chosen=[{"start":start,"end":min(duration,max_len),"text":"","score":0}]
-    return sorted(chosen,key=lambda x:x["start"])
+    """Rank multilingual transcript moments using explainable engagement signals."""
+    if not segments or duration <= 0:
+        return []
+
+    hook_terms = [
+        "because", "secret", "mistake", "important", "why", "how", "never",
+        "truth", "believe", "remember", "finally", "best", "worst", "surprise",
+        "लेकिन", "क्यों", "कैसे", "सच", "गलती", "जरूरी", "याद", "क्योंकि",
+        "देखिए", "सोचिए", "ਸੱਚ", "ਕਿਉਂ", "ਕਿਵੇਂ", "ਗਲਤੀ", "ਜ਼ਰੂਰੀ",
+        "ਯਾਦ", "ਕਿਉਂਕਿ", "ਵੇਖੋ", "ਸੋਚੋ"
+    ]
+    emotion_terms = [
+        "amazing", "shocking", "love", "hate", "fail", "win", "success",
+        "danger", "crazy", "powerful", "incredible", "ध्यान", "कमाल",
+        "खतरनाक", "प्यार", "जीत", "ਸਫਲਤਾ", "ਕਮਾਲ", "ਖਤਰਨਾਕ"
+    ]
+
+    candidates = []
+    for i, first in enumerate(segments):
+        start = max(0.0, float(first.get("start", 0)))
+        if start >= duration:
+            continue
+        window = []
+        end = start
+        for seg in segments[i:]:
+            seg_start = float(seg.get("start", 0))
+            seg_end = min(duration, float(seg.get("end", seg_start)))
+            if seg_start - start > max_len:
+                break
+            if seg_end > start:
+                window.append(seg)
+                end = max(end, seg_end)
+            if end - start >= 40:
+                break
+        if end - start < min_len:
+            continue
+        end = min(duration, end, start + max_len)
+        text = clean_text(" ".join(str(x.get("text", "")) for x in window))
+        words = re.findall(r"\w+", text.lower(), flags=re.UNICODE)
+        word_count = len(words)
+        if word_count < 18:
+            continue
+
+        lower_text = text.lower()
+        hook_hits = sum(1 for term in hook_terms if term in lower_text)
+        emotion_hits = sum(1 for term in emotion_terms if term in lower_text)
+        question_hits = text.count("?") + text.count("؟")
+        exclamation_hits = text.count("!") + text.count("！")
+        number_hits = len(re.findall(r"\d+", text))
+        density = word_count / max(1.0, end - start)
+        density_score = max(0.0, 3.0 - abs(density - 2.5))
+        confidences = [
+            max(0.0, min(1.0, float(x.get("confidence", 0.5))))
+            for x in window
+        ]
+        confidence_score = sum(confidences) / max(1, len(confidences))
+        completeness = 1.5 if re.search(r"[.!?।؟]$", text) else 0.0
+        score = (
+            min(word_count, 110) / 18.0
+            + min(hook_hits, 5) * 1.15
+            + min(emotion_hits, 3) * 0.8
+            + min(question_hits, 2) * 0.9
+            + min(exclamation_hits, 2) * 0.35
+            + min(number_hits, 3) * 0.25
+            + density_score + confidence_score + completeness
+        )
+        candidates.append({
+            "start": round(start, 2), "end": round(end, 2),
+            "text": text, "score": round(score, 3)
+        })
+
+    candidates.sort(key=lambda item: item["score"], reverse=True)
+    chosen = []
+    for candidate in candidates:
+        if all(
+            candidate["end"] + 3 <= item["start"]
+            or candidate["start"] >= item["end"] + 3
+            for item in chosen
+        ):
+            chosen.append(candidate)
+        if len(chosen) >= max(1, int(wanted)):
+            break
+
+    if not chosen:
+        start = max(0.0, float(segments[0].get("start", 0)))
+        end = min(duration, start + max_len)
+        chosen = [{
+            "start": start, "end": end,
+            "text": clean_text(" ".join(str(x.get("text", "")) for x in segments)),
+            "score": 0
+        }]
+    return sorted(chosen, key=lambda item: item["start"])
 def process_job(job_id,src,language,count,aspect):
     job=get_job(job_id); job.update(status="processing",progress=5,message="Preparing audio"); write_job(job)
     try:
